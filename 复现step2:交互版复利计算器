@@ -1,0 +1,230 @@
+# -*- coding: utf-8 -*-
+r"""
+复利计算器 —— 苹果风格桌面版（CustomTkinter）
+
+核心公式：
+    A = P * (1 + r/m) ^ (n*m)
+
+  A：最终本息和      P：本金
+  r：年利率（小数）   n：存期（年）   m：每年复利次数
+
+运行方式（本机 python 被商店别名劫持，需用显式路径）：
+    & "C:\Users\1\AppData\Local\Python\pythoncore-3.14-64\python.exe" -B compound_interest_gui.py
+"""
+
+import customtkinter as ctk
+
+# ======================= 配色（Apple 深色风格） =======================
+APP_BG = "#101013"       # 窗口背景：接近纯黑的深灰
+CARD_BG = "#1D1D21"      # 卡片背景：苹果深色模式的卡片灰
+FIELD_BG = "#2A2A2F"     # 输入框背景
+ACCENT = "#0A84FF"       # 强调色：苹果系统蓝
+ACCENT_HOVER = "#0069D9" # 按钮悬停色（加深）
+TEXT_MAIN = "#F5F5F7"    # 主文字：苹果白
+TEXT_SUB = "#9A9AA2"     # 次要文字：灰色
+FONT_NAME = "Microsoft YaHei UI"  # Windows 下接近苹方的中文字体
+
+
+# ======================= 计算部分 =======================
+def parse_rate(text):
+    """
+    解析利率输入，兼容三种写法：
+      "5"    -> 0.05 （默认按百分数理解）
+      "5%"   -> 0.05
+      "0.05" -> 0.05 （小于 1 的数按小数利率理解）
+    """
+    s = str(text).strip().replace("%", "")  # 去掉空格和百分号
+    val = float(s)                          # 转成浮点数
+    # ≥1 视为百分数（5 → 0.05），<1 视为已是小数利率（0.05 → 0.05）
+    return val / 100.0 if val >= 1 else val
+
+
+def compound(P, r, n, m):
+    """
+    复利公式：A = P * (1 + r/m)^(n*m)
+
+    逐行解释公式的含义：
+      r / m               → 把年利率平摊到每个复利周期（月复利即 r/12）
+      (1 + r/m)           → 每过一个周期，本息变为上一期的 (1 + r/m) 倍
+      n * m               → n 年、每年复利 m 次，整个存期共有 n*m 个周期
+      (1 + r/m) ** (n*m)  → 幂运算：增长倍数自乘 n*m 次，即总增长倍数
+      P * (...)           → 本金乘以总增长倍数，得到最终本息和 A
+    """
+    periods = n * m                     # 总复利周期数
+    per_rate = r / m                    # 每个周期的利率
+    A = P * (1 + per_rate) ** periods   # 本金 × 总增长倍数 = 本息和
+    return A
+
+
+def yearly_schedule(P, r, n, m):
+    """逐年明细：返回 [(年, 年初余额, 年末余额), ...]"""
+    rows = []
+    balance = P                         # 余额从本金开始
+    for y in range(1, int(n) + 1):      # 逐年滚动
+        start = balance
+        balance = balance * (1 + r / m) ** m  # 该年内复利 m 次
+        rows.append((y, start, balance))
+    return rows
+
+
+# ======================= 界面部分 =======================
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__(fg_color=APP_BG)
+        self.title("复利计算器")
+        self.geometry("430x800")
+        self.resizable(False, False)
+        self._center()  # 窗口居中
+
+        # ---- 字体定义 ----
+        f_title = ctk.CTkFont(family=FONT_NAME, size=24, weight="bold")
+        f_sub = ctk.CTkFont(family=FONT_NAME, size=12)
+        f_label = ctk.CTkFont(family=FONT_NAME, size=13)
+        f_entry = ctk.CTkFont(family=FONT_NAME, size=14)
+        f_button = ctk.CTkFont(family=FONT_NAME, size=15, weight="bold")
+        f_big = ctk.CTkFont(family=FONT_NAME, size=36, weight="bold")
+        f_small = ctk.CTkFont(family=FONT_NAME, size=12)
+        f_head = ctk.CTkFont(family=FONT_NAME, size=12, weight="bold")
+
+        # ---- 标题区 ----
+        ctk.CTkLabel(self, text="复利计算器", font=f_title,
+                     text_color=TEXT_MAIN).pack(pady=(28, 2))
+        ctk.CTkLabel(self, text="A = P × (1 + r/m)^(n·m)", font=f_sub,
+                     text_color=TEXT_SUB).pack(pady=(0, 18))
+
+        # ---- 输入卡片 ----
+        card_in = ctk.CTkFrame(self, fg_color=CARD_BG, corner_radius=16)
+        card_in.pack(padx=20, fill="x")
+
+        self.e_principal = self._row(card_in, 0, "本金（元）", "10000", f_label, f_entry)
+        self.e_rate = self._row(card_in, 1, "年利率（%）", "5", f_label, f_entry)
+        self.e_years = self._row(card_in, 2, "存期（年）", "3", f_label, f_entry)
+
+        # 复利频率下拉框
+        ctk.CTkLabel(card_in, text="复利频率", font=f_label,
+                     text_color=TEXT_SUB).grid(row=3, column=0, sticky="w",
+                                               padx=18, pady=(12, 16))
+        self.freq_menu = ctk.CTkOptionMenu(
+            card_in, values=["每年 1 次", "每半年 2 次", "每季度 4 次", "每月 12 次"],
+            font=f_entry, fg_color=FIELD_BG, button_color=FIELD_BG,
+            button_hover_color="#3A3A40", text_color=TEXT_MAIN,
+            corner_radius=10, width=160, command=self.recalc)
+        self.freq_menu.grid(row=3, column=1, sticky="e", padx=18, pady=(12, 16))
+        self.freq_menu.set("每年 1 次")
+
+        # ---- 计算按钮 ----
+        ctk.CTkButton(self, text="计算本息和", font=f_button, height=44,
+                      corner_radius=12, fg_color=ACCENT,
+                      hover_color=ACCENT_HOVER,
+                      command=self.recalc).pack(padx=20, pady=(16, 4), fill="x")
+
+        # ---- 结果卡片 ----
+        card_out = ctk.CTkFrame(self, fg_color=CARD_BG, corner_radius=16)
+        card_out.pack(padx=20, pady=(12, 0), fill="x")
+        ctk.CTkLabel(card_out, text="最终本息和", font=f_label,
+                     text_color=TEXT_SUB).pack(pady=(16, 0))
+        self.lbl_result = ctk.CTkLabel(card_out, text="—", font=f_big,
+                                       text_color=TEXT_MAIN)
+        self.lbl_result.pack(pady=(2, 4))
+        self.lbl_detail = ctk.CTkLabel(card_out, text="", font=f_small,
+                                       text_color=TEXT_SUB)
+        self.lbl_detail.pack(pady=(0, 16))
+
+        # ---- 逐年明细卡片 ----
+        card_tb = ctk.CTkFrame(self, fg_color=CARD_BG, corner_radius=16)
+        card_tb.pack(padx=20, pady=(12, 20), fill="x")
+        ctk.CTkLabel(card_tb, text="逐年明细", font=f_label,
+                     text_color=TEXT_SUB).pack(anchor="w", padx=18, pady=(14, 4))
+        self.tb_body = ctk.CTkFrame(card_tb, fg_color="transparent")
+        self.tb_body.pack(fill="x", padx=18, pady=(0, 14))
+
+        # 输入变化时实时重算
+        for e in (self.e_principal, self.e_rate, self.e_years):
+            e.bind("<KeyRelease>", self.recalc)
+
+        self.recalc()  # 启动即按默认值算一次
+
+    # 输入卡片里的一行：左标签 + 右输入框
+    def _row(self, parent, row, text, default, f_label, f_entry):
+        ctk.CTkLabel(parent, text=text, font=f_label,
+                     text_color=TEXT_SUB).grid(row=row, column=0, sticky="w",
+                                               padx=18, pady=(12, 0) if row else (16, 0))
+        entry = ctk.CTkEntry(parent, font=f_entry, height=36, width=160,
+                             fg_color=FIELD_BG, border_width=0,
+                             corner_radius=10, text_color=TEXT_MAIN,
+                             justify="right")
+        entry.insert(0, default)
+        entry.grid(row=row, column=1, sticky="e", padx=18, pady=(10, 0) if row else (14, 0))
+        return entry
+
+    # 校验失败时的统一处理：清空结果与明细，红字提示，等待重新输入
+    def _show_error(self, msg):
+        self.lbl_result.configure(text="—")
+        self.lbl_detail.configure(text=msg, text_color="#FF453A")
+        for w in self.tb_body.winfo_children():
+            w.destroy()
+
+    # 主计算：读取输入 → 校验 → 公式 → 刷新界面
+    def recalc(self, *args):
+        try:
+            P = float(self.e_principal.get())        # 本金
+            r = parse_rate(self.e_rate.get())        # 年利率（转小数）
+            n = float(self.e_years.get())            # 存期（年）
+            m = {"每年 1 次": 1, "每半年 2 次": 2,
+                 "每季度 4 次": 4, "每月 12 次": 12}[self.freq_menu.get()]
+        except ValueError:
+            self._show_error("请输入有效数字")
+            return
+
+        # 负数利率校验：提示后保持结果无效，用户改正输入后自动重算
+        if r < 0:
+            self._show_error("利率不能为负，请重新输入")
+            return
+        if P <= 0 or n <= 0:
+            self._show_error("本金和存期需大于 0")
+            return
+
+        A = compound(P, r, n, m)            # 复利本息和
+        simple = P * r * n                  # 单利本息（对比用）
+        detail = "复利利息 +{:,.2f} 元 · 比单利多 {:,.2f} 元".format(A - P, A - P - simple)
+
+        self.lbl_result.configure(text="{:,.2f} 元".format(A))
+        self.lbl_detail.configure(text=detail, text_color=TEXT_SUB)
+        self._build_table(P, r, n, m)
+
+    # 重建逐年明细表
+    def _build_table(self, P, r, n, m):
+        for w in self.tb_body.winfo_children():
+            w.destroy()
+        f_head = ctk.CTkFont(family=FONT_NAME, size=12, weight="bold")
+        f_cell = ctk.CTkFont(family=FONT_NAME, size=13)
+        cols = ("年份", "期初（元）", "期末（元）")
+        for c, t in enumerate(cols):
+            self.tb_body.grid_columnconfigure(c, weight=1)
+            ctk.CTkLabel(self.tb_body, text=t, font=f_head,
+                         text_color=TEXT_SUB).grid(row=0, column=c, sticky="ew")
+        if n == int(n) and n <= 50:  # 整数年且不超过 50 年才展示明细
+            for i, (y, s0, s1) in enumerate(yearly_schedule(P, r, n, m), start=1):
+                self._cell(i, c=0, text=str(y), font=f_cell, color=TEXT_SUB)
+                self._cell(i, c=1, text="{:,.2f}".format(s0), font=f_cell, color=TEXT_SUB)
+                self._cell(i, c=2, text="{:,.2f}".format(s1), font=f_cell, color=ACCENT)
+        else:
+            ctk.CTkLabel(self.tb_body, text="存期为小数或超过 50 年，不展示明细",
+                         font=ctk.CTkFont(family=FONT_NAME, size=12),
+                         text_color=TEXT_SUB).grid(row=1, column=0, columnspan=3, pady=6)
+
+    def _cell(self, row, c, text, font, color):
+        ctk.CTkLabel(self.tb_body, text=text, font=font,
+                     text_color=color).grid(row=row, column=c, sticky="ew", pady=1)
+
+    # 窗口屏幕居中
+    def _center(self):
+        self.update_idletasks()
+        w, h = 430, 800
+        x = (self.winfo_screenwidth() - w) // 2
+        y = (self.winfo_screenheight() - h) // 2
+        self.geometry("{}x{}+{}+{}".format(w, h, x, y))
+
+
+if __name__ == "__main__":
+    App().mainloop()
